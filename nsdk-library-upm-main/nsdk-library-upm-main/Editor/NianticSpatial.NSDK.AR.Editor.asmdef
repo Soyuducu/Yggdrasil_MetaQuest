@@ -1,0 +1,37 @@
+{
+    "name": "NianticSpatial.NSDK.AR.Editor",
+    "rootNamespace": "NianticSpatial.NSDK.AR.Editor",
+    "references": [
+        "Unity.EditorCoroutines.Editor",
+        "Unity.XR.ARSubsystems",
+        "Unity.XR.Management",
+        "Unity.XR.CoreUtils",
+        "Unity.XR.CoreUtils.Editor",
+        "Unity.XR.Management.Editor",
+        "NianticSpatial.NSDK.AR",
+        "Unity.XR.ARCore",
+        "Unity.XR.ARKit",
+        "Unity.XR.OpenXR",
+        "Unity.XR.ARSubsystems.Editor",
+        "Unity.XR.ARFoundation",
+        "Unity.XR.Simulation",
+        "Unity.RenderPipelines.Universal.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.render-pipelines.universal",
+            "expression": "",
+            "define": "MODULE_URP_ENABLED"
+        }
+    ],
+    "noEngineReferences": false
+}

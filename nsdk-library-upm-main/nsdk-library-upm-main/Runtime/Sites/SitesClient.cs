@@ -1,0 +1,686 @@
+// Copyright Niantic Spatial.
+
+using System;
+using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
+using NianticSpatial.NSDK.AR.API;
+using NianticSpatial.NSDK.AR.Core;
+using NianticSpatial.NSDK.AR.Sites.Api;
+using NianticSpatial.NSDK.AR.Utilities;
+using NianticSpatial.NSDK.AR.Utilities.Logging;
+using UnityEngine;
+
+namespace NianticSpatial.NSDK.AR.Sites
+{
+    /// <summary>
+    /// Client for interacting with the Sites Manager service.
+    /// Provides methods to query organizational hierarchy data including users,
+    /// organizations, sites, and assets.
+    /// </summary>
+    [PublicAPI]
+    public class SitesClient : IDisposable
+    {
+        private const int DefaultPollingIntervalMs = 100;
+        private const int DefaultTimeoutMs = 60000;
+
+        private bool _isDisposed;
+        private CancellationTokenRegistration _exitTokenRegistration;
+
+        /// <summary>
+        /// Creates a new SitesClient.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown if the NSDK context is not initialized.
+        /// </exception>
+        public SitesClient()
+        {
+            if (!TryGetNSDKHandle(out var handle))
+            {
+                throw new InvalidOperationException("NSDK context is not initialized. Cannot create SitesClient.");
+            }
+
+            var status = NativeSitesApi.ARDK_SitesManager_Create(handle);
+            if (status != NsdkStatus.Ok && status != NsdkStatus.FeatureAlreadyExists)
+            {
+                throw new InvalidOperationException($"Failed to create Sites Manager. Status: {status}");
+            }
+
+            // Dispose early when the application is quitting (e.g. exiting play mode) so that
+            // the _isDisposed guard in PollForResultAsync prevents native calls into a destroyed context.
+            // Unity's destruction order is non-deterministic, so NsdkUnityContext may be torn down
+            // before SitesClientManager.OnDestroy() calls Dispose().
+            _exitTokenRegistration = Application.exitCancellationToken.Register(Dispose);
+        }
+
+        /// <summary>
+        /// Releases native resources.
+        /// </summary>
+        /// <remarks>
+        /// The Unity SDK does not explicitly destroy the SitesManager component because
+        /// we can't easily guarantee the component will be destroyed before NsdkUnityContext is.
+        /// The native NSDK holds a shared pointer to its components, so when it is destroyed,
+        /// all its components will be released too.
+        /// </remarks>
+        public void Dispose()
+        {
+            if (_isDisposed)
+            {
+                return;
+            }
+            _isDisposed = true;
+            _exitTokenRegistration.Dispose();
+
+            // Note: We intentionally do NOT call ARDK_SitesManager_Destroy here.
+            // The native NSDK manages component lifecycle - when the NSDK handle is destroyed,
+            // all its components (including SitesManager) are automatically released.
+            // Calling Destroy explicitly can crash if NsdkUnityContext is already shut down.
+        }
+
+        // ============================================================================
+        // Public async API
+        // ============================================================================
+
+        /// <summary>
+        /// Requests information for the currently authenticated user.
+        /// To fetch organizations, consider using <see cref="RequestSelfOrganizationInfoAsync"/> instead.
+        /// </summary>
+        /// <param name="timeoutMs">Maximum time to wait for the request to complete.</param>
+        /// <param name="cancellationToken">Token to cancel the operation.</param>
+        /// <returns>The user result.</returns>
+        public async Task<UserResult> RequestSelfUserInfoAsync(
+            int timeoutMs = DefaultTimeoutMs,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+
+            if (!TryGetNSDKHandle(out var handle))
+            {
+                throw new InvalidOperationException("NSDK context is not initialized. Cannot make Sites request");
+            }
+
+            var status = NativeSitesApi.RequestSelfUserInfo(handle, out var requestId);
+            if (status != NsdkStatus.Ok)
+            {
+                Log.Error($"Failed to request self user info. Status: {status}");
+                return UserResult.Failure(SitesError.UnexpectedError);
+            }
+
+            return await PollForResultAsync(
+                requestId, GetUserResult, UserResult.Failure, timeoutMs, cancellationToken);
+        }
+
+        /// <summary>
+        /// Requests organizations for the current authenticated session.
+        /// </summary>
+        /// <param name="timeoutMs">Maximum time to wait for the request to complete.</param>
+        /// <param name="cancellationToken">Token to cancel the operation.</param>
+        /// <returns>The organization result.</returns>
+        public async Task<OrganizationResult> RequestSelfOrganizationInfoAsync(
+            int timeoutMs = DefaultTimeoutMs,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+
+            if (!TryGetNSDKHandle(out var handle))
+            {
+                throw new InvalidOperationException("NSDK context is not initialized. Cannot make Sites request");
+            }
+
+            var status = NativeSitesApi.RequestSelfOrganizationInfo(handle, out var requestId);
+            if (status != NsdkStatus.Ok)
+            {
+                Log.Error($"Failed to request self organization info. Status: {status}");
+                return OrganizationResult.Failure(SitesError.UnexpectedError);
+            }
+
+            return await PollForResultAsync(
+                requestId, GetOrganizationResult, OrganizationResult.Failure, timeoutMs, cancellationToken);
+        }
+
+        /// <summary>
+        /// Requests user information by user ID.
+        /// </summary>
+        public async Task<UserResult> RequestUserInfoAsync(
+            string userId,
+            int timeoutMs = DefaultTimeoutMs,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+
+            if (!TryGetNSDKHandle(out var handle))
+            {
+                throw new InvalidOperationException("NSDK context is not initialized. Cannot make Sites request");
+            }
+
+
+            var status = NativeSitesApi.RequestUserInfo(handle, userId, out var requestId);
+            if (status != NsdkStatus.Ok)
+            {
+                Log.Error($"Failed to request user info. Status: {status}");
+                return UserResult.Failure(SitesError.UnexpectedError);
+            }
+
+            return await PollForResultAsync(
+                requestId, GetUserResult, UserResult.Failure, timeoutMs, cancellationToken);
+        }
+
+        /// <summary>
+        /// Requests all organizations for a user.
+        /// Consider using <see cref="RequestSelfOrganizationInfoAsync"/> instead.
+        /// </summary>
+        public async Task<OrganizationResult> RequestOrganizationsForUserAsync(
+            string userId,
+            int timeoutMs = DefaultTimeoutMs,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+
+            if (!TryGetNSDKHandle(out var handle))
+            {
+                throw new InvalidOperationException("NSDK context is not initialized. Cannot make Sites request");
+            }
+
+            var status = NativeSitesApi.RequestOrganizationsForUser(handle, userId, out var requestId);
+            if (status != NsdkStatus.Ok)
+            {
+                Log.Error($"Failed to request organizations for user. Status: {status}");
+                return OrganizationResult.Failure(SitesError.UnexpectedError);
+            }
+
+            return await PollForResultAsync(
+                requestId, GetOrganizationResult, OrganizationResult.Failure, timeoutMs, cancellationToken);
+        }
+
+        /// <summary>
+        /// Requests organization information by organization ID.
+        /// </summary>
+        public async Task<OrganizationResult> RequestOrganizationInfoAsync(
+            string orgId,
+            int timeoutMs = DefaultTimeoutMs,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+
+            if (!TryGetNSDKHandle(out var handle))
+            {
+                throw new InvalidOperationException("NSDK context is not initialized. Cannot make Sites request");
+            }
+
+            var status = NativeSitesApi.RequestOrganizationInfo(handle, orgId, out var requestId);
+            if (status != NsdkStatus.Ok)
+            {
+                Log.Error($"Failed to request organization info. Status: {status}");
+                return OrganizationResult.Failure(SitesError.UnexpectedError);
+            }
+
+            return await PollForResultAsync(
+                requestId, GetOrganizationResult, OrganizationResult.Failure, timeoutMs, cancellationToken);
+        }
+
+        /// <summary>
+        /// Requests all sites for an organization.
+        /// </summary>
+        public async Task<SiteResult> RequestSitesForOrganizationAsync(
+            string orgId,
+            int timeoutMs = DefaultTimeoutMs,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+
+            if (!TryGetNSDKHandle(out var handle))
+            {
+                throw new InvalidOperationException("NSDK context is not initialized. Cannot make Sites request");
+            }
+
+            var status = NativeSitesApi.RequestSitesForOrganization(handle, orgId, out var requestId);
+            if (status != NsdkStatus.Ok)
+            {
+                Log.Error($"Failed to request sites for organization. Status: {status}");
+                return SiteResult.Failure(SitesError.UnexpectedError);
+            }
+
+            return await PollForResultAsync(
+                requestId, GetSiteResult, SiteResult.Failure, timeoutMs, cancellationToken);
+        }
+
+        /// <summary>
+        /// Requests site information by site ID.
+        /// </summary>
+        public async Task<SiteResult> RequestSiteInfoAsync(
+            string siteId,
+            int timeoutMs = DefaultTimeoutMs,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+
+            if (!TryGetNSDKHandle(out var handle))
+            {
+                throw new InvalidOperationException("NSDK context is not initialized. Cannot make Sites request");
+            }
+
+            var status = NativeSitesApi.RequestSiteInfo(handle, siteId, out var requestId);
+            if (status != NsdkStatus.Ok)
+            {
+                Log.Error($"Failed to request site info. Status: {status}");
+                return SiteResult.Failure(SitesError.UnexpectedError);
+            }
+
+            return await PollForResultAsync(
+                requestId, GetSiteResult, SiteResult.Failure, timeoutMs, cancellationToken);
+        }
+
+        /// <summary>
+        /// Requests all assets for a site.
+        /// </summary>
+        public async Task<AssetResult> RequestAssetsForSiteAsync(
+            string siteId,
+            int timeoutMs = DefaultTimeoutMs,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+
+            if (!TryGetNSDKHandle(out var handle))
+            {
+                throw new InvalidOperationException("NSDK context is not initialized. Cannot make Sites request");
+            }
+
+            var status = NativeSitesApi.RequestAssetsForSite(handle, siteId, out var requestId);
+            if (status != NsdkStatus.Ok)
+            {
+                Log.Error($"Failed to request assets for site. Status: {status}");
+                return AssetResult.Failure(SitesError.UnexpectedError);
+            }
+
+            return await PollForResultAsync(
+                requestId, GetAssetResult, AssetResult.Failure, timeoutMs, cancellationToken);
+        }
+
+        /// <summary>
+        /// Requests asset information by asset ID.
+        /// </summary>
+        public async Task<AssetResult> RequestAssetInfoAsync(
+            string assetId,
+            int timeoutMs = DefaultTimeoutMs,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+
+            if (!TryGetNSDKHandle(out var handle))
+            {
+                throw new InvalidOperationException("NSDK context is not initialized. Cannot make Sites request");
+            }
+
+            var status = NativeSitesApi.RequestAssetInfo(handle, assetId, out var requestId);
+            if (status != NsdkStatus.Ok)
+            {
+                Log.Error($"Failed to request asset info. Status: {status}");
+                return AssetResult.Failure(SitesError.UnexpectedError);
+            }
+
+            return await PollForResultAsync(
+                requestId, GetAssetResult, AssetResult.Failure, timeoutMs, cancellationToken);
+        }
+
+        /// <summary>
+        /// Requests sites and assets near a GPS coordinate.
+        /// </summary>
+        /// <param name="lat">Latitude of the query coordinate, in degrees.</param>
+        /// <param name="lng">Longitude of the query coordinate, in degrees.</param>
+        /// <param name="radiusMeters">Search radius around the coordinate, in meters.</param>
+        /// <param name="assetType">The type of assets to filter results by.</param>
+        /// <param name="timeoutMs">Maximum time to wait for the request to complete.</param>
+        /// <param name="cancellationToken">Token to cancel the operation.</param>
+        /// <returns>The site-assets result ordered by distance.</returns>
+        public async Task<SiteAssetsResult> RequestSiteAssetsByLocationAsync(
+            double lat,
+            double lng,
+            double radiusMeters,
+            AssetType assetType,
+            int timeoutMs = DefaultTimeoutMs,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+
+            if (!TryGetNSDKHandle(out var handle))
+            {
+                throw new InvalidOperationException("NSDK context is not initialized. Cannot make Sites request");
+            }
+
+            var status = NativeSitesApi.RequestSiteAssetsByLocation(
+                handle, lat, lng, radiusMeters, assetType, out var requestId);
+            if (status != NsdkStatus.Ok)
+            {
+                Log.Error($"Failed to request site assets by location. Status: {status}");
+                return SiteAssetsResult.Failure(SitesError.UnexpectedError);
+            }
+
+            return await PollForResultAsync(
+                requestId, GetSiteAssetsResult, SiteAssetsResult.Failure, timeoutMs, cancellationToken);
+        }
+
+        // ============================================================================
+        // Polling helpers
+        // ============================================================================
+
+        /// <summary>
+        /// Try to get NSDK handle and check validity. Since this class's life cycle is not tied to NSDK
+        /// handle/context, we should get the handle every time calling to native API.
+        /// </summary>
+        private bool TryGetNSDKHandle(out IntPtr handle)
+        {
+            handle = NsdkUnityContext.GetNSDKHandle(NsdkUnityContext.UnityContextHandle);
+            if (!handle.IsValidHandle())
+            {
+                Log.Error("NSDK context is not initialized.");
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Result state from a single poll attempt.
+        /// </summary>
+        private readonly struct PollState<TResult>
+        {
+            public SitesRequestStatus Status { get; }
+            public SitesError Error { get; }
+            public TResult Result { get; }
+
+            private PollState(SitesRequestStatus status, SitesError error, TResult result)
+            {
+                Status = status;
+                Error = error;
+                Result = result;
+            }
+
+            public static PollState<TResult> InProgress() =>
+                new PollState<TResult>(SitesRequestStatus.InProgress, SitesError.None, default);
+
+            public static PollState<TResult> Success(TResult result) =>
+                new PollState<TResult>(SitesRequestStatus.Success, SitesError.None, result);
+
+            public static PollState<TResult> Failed(SitesError error) =>
+                new PollState<TResult>(SitesRequestStatus.Failed, error, default);
+        }
+
+        /// <summary>
+        /// Generic polling helper that waits for a request to complete.
+        /// This mirrors the Swift pattern in NsdkSitesSession.pollForResult().
+        /// </summary>
+        /// <param name="requestId">The request ID to poll for.</param>
+        /// <param name="getResult">Function to poll for the result state.</param>
+        /// <param name="createFailure">Function to create a failure result.</param>
+        /// <param name="timeoutMs">Maximum time to wait for completion.</param>
+        /// <param name="cancellationToken">Token to cancel the operation.</param>
+        /// <returns>The result when the request completes.</returns>
+        private async Task<TResult> PollForResultAsync<TResult>(
+            ulong requestId,
+            Func<ulong, PollState<TResult>> getResult,
+            Func<SitesError, TResult> createFailure,
+            int timeoutMs,
+            CancellationToken cancellationToken)
+        {
+            var startTime = DateTime.UtcNow;
+
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if ((DateTime.UtcNow - startTime).TotalMilliseconds > timeoutMs)
+                {
+                    return createFailure(SitesError.UnexpectedError);
+                }
+
+                if (_isDisposed)
+                {
+                    Log.Warning("SitesClient attempted to poll for a network response when it has already been disposed.");
+                    return createFailure(SitesError.UnexpectedError);
+                }
+
+                var state = getResult(requestId);
+
+                switch (state.Status)
+                {
+                    case SitesRequestStatus.Success:
+                        return state.Result;
+                    case SitesRequestStatus.Failed:
+                        return createFailure(state.Error);
+                    case SitesRequestStatus.InProgress:
+                        await Task.Delay(DefaultPollingIntervalMs, cancellationToken);
+                        break;
+                }
+            }
+        }
+
+        // Individual result getters that poll native and convert to managed types
+
+        private PollState<UserResult> GetUserResult(ulong requestId)
+        {
+            if (!TryGetNSDKHandle(out var handle))
+            {
+                return PollState<UserResult>.Failed(SitesError.UnexpectedError);
+            }
+
+            var status = NativeSitesApi.ARDK_SitesManager_GetUserResult(
+                handle, requestId, out var nativeResult);
+
+            if (status != NsdkStatus.Ok)
+            {
+                return PollState<UserResult>.Failed(SitesError.UnexpectedError);
+            }
+
+            var requestStatus = (SitesRequestStatus)nativeResult.status;
+
+            if (requestStatus == SitesRequestStatus.Success)
+            {
+                // Marshal data BEFORE releasing the handle (handle owns the memory)
+                UserInfo? user = null;
+                if (nativeResult.user != IntPtr.Zero)
+                {
+                    var nativeUser = Marshal.PtrToStructure<NativeSitesApi.NativeUserInfo>(nativeResult.user);
+                    user = NativeSitesApi.ConvertUser(nativeUser);
+                }
+
+                // Now safe to release
+                if (nativeResult.handle != IntPtr.Zero)
+                {
+                    NsdkExternUtils.ReleaseResource(nativeResult.handle);
+                }
+
+                if (user.HasValue)
+                {
+                    return PollState<UserResult>.Success(UserResult.Success(user.Value));
+                }
+
+                // Success but no user data - treat as unexpected error
+                return PollState<UserResult>.Failed(SitesError.UnexpectedError);
+            }
+
+            if (requestStatus == SitesRequestStatus.Failed)
+            {
+                if (nativeResult.handle != IntPtr.Zero)
+                {
+                    NsdkExternUtils.ReleaseResource(nativeResult.handle);
+                }
+                return PollState<UserResult>.Failed((SitesError)nativeResult.error);
+            }
+
+            return PollState<UserResult>.InProgress();
+        }
+
+        private PollState<OrganizationResult> GetOrganizationResult(ulong requestId)
+        {
+            if (!TryGetNSDKHandle(out var handle))
+            {
+                return PollState<OrganizationResult>.Failed(SitesError.UnexpectedError);
+            }
+
+            var status = NativeSitesApi.ARDK_SitesManager_GetOrganizationResult(
+                handle, requestId, out var nativeResult);
+
+            if (status != NsdkStatus.Ok)
+            {
+                return PollState<OrganizationResult>.Failed(SitesError.UnexpectedError);
+            }
+
+            var requestStatus = (SitesRequestStatus)nativeResult.status;
+
+            if (requestStatus == SitesRequestStatus.Success)
+            {
+                var organizations = NativeSitesApi.ConvertOrganizations(
+                    nativeResult.organizations, nativeResult.organizations_size);
+
+                if (nativeResult.handle != IntPtr.Zero)
+                {
+                    NsdkExternUtils.ReleaseResource(nativeResult.handle);
+                }
+
+                return PollState<OrganizationResult>.Success(OrganizationResult.Success(organizations));
+            }
+
+            if (requestStatus == SitesRequestStatus.Failed)
+            {
+                if (nativeResult.handle != IntPtr.Zero)
+                {
+                    NsdkExternUtils.ReleaseResource(nativeResult.handle);
+                }
+                return PollState<OrganizationResult>.Failed((SitesError)nativeResult.error);
+            }
+
+            return PollState<OrganizationResult>.InProgress();
+        }
+
+        private PollState<SiteResult> GetSiteResult(ulong requestId)
+        {
+            if (!TryGetNSDKHandle(out var handle))
+            {
+                return PollState<SiteResult>.Failed(SitesError.UnexpectedError);
+            }
+
+            var status = NativeSitesApi.ARDK_SitesManager_GetSiteResult(
+                handle, requestId, out var nativeResult);
+
+            if (status != NsdkStatus.Ok)
+            {
+                return PollState<SiteResult>.Failed(SitesError.UnexpectedError);
+            }
+
+            var requestStatus = (SitesRequestStatus)nativeResult.status;
+
+            if (requestStatus == SitesRequestStatus.Success)
+            {
+                var sites = NativeSitesApi.ConvertSites(nativeResult.sites, nativeResult.sites_size);
+
+                if (nativeResult.handle != IntPtr.Zero)
+                {
+                    NsdkExternUtils.ReleaseResource(nativeResult.handle);
+                }
+
+                return PollState<SiteResult>.Success(SiteResult.Success(sites));
+            }
+
+            if (requestStatus == SitesRequestStatus.Failed)
+            {
+                if (nativeResult.handle != IntPtr.Zero)
+                {
+                    NsdkExternUtils.ReleaseResource(nativeResult.handle);
+                }
+                return PollState<SiteResult>.Failed((SitesError)nativeResult.error);
+            }
+
+            return PollState<SiteResult>.InProgress();
+        }
+
+        private PollState<AssetResult> GetAssetResult(ulong requestId)
+        {
+            if (!TryGetNSDKHandle(out var handle))
+            {
+                return PollState<AssetResult>.Failed(SitesError.UnexpectedError);
+            }
+
+            var status = NativeSitesApi.ARDK_SitesManager_GetAssetResult(
+                handle, requestId, out var nativeResult);
+
+            if (status != NsdkStatus.Ok)
+            {
+                return PollState<AssetResult>.Failed(SitesError.UnexpectedError);
+            }
+
+            var requestStatus = (SitesRequestStatus)nativeResult.status;
+
+            if (requestStatus == SitesRequestStatus.Success)
+            {
+                var assets = NativeSitesApi.ConvertAssets(nativeResult.assets, nativeResult.assets_size);
+
+                if (nativeResult.handle != IntPtr.Zero)
+                {
+                    NsdkExternUtils.ReleaseResource(nativeResult.handle);
+                }
+
+                return PollState<AssetResult>.Success(AssetResult.Success(assets));
+            }
+
+            if (requestStatus == SitesRequestStatus.Failed)
+            {
+                if (nativeResult.handle != IntPtr.Zero)
+                {
+                    NsdkExternUtils.ReleaseResource(nativeResult.handle);
+                }
+                return PollState<AssetResult>.Failed((SitesError)nativeResult.error);
+            }
+
+            return PollState<AssetResult>.InProgress();
+        }
+
+        private PollState<SiteAssetsResult> GetSiteAssetsResult(ulong requestId)
+        {
+            if (!TryGetNSDKHandle(out var handle))
+            {
+                return PollState<SiteAssetsResult>.Failed(SitesError.UnexpectedError);
+            }
+
+            var status = NativeSitesApi.ARDK_SitesManager_GetSiteAssetsResult(
+                handle, requestId, out var nativeResult);
+
+            if (status != NsdkStatus.Ok)
+            {
+                return PollState<SiteAssetsResult>.Failed(SitesError.UnexpectedError);
+            }
+
+            var requestStatus = (SitesRequestStatus)nativeResult.status;
+
+            if (requestStatus == SitesRequestStatus.Success)
+            {
+                var entries = NativeSitesApi.ConvertSiteAssets(
+                    nativeResult.site_assets, nativeResult.site_assets_size);
+
+                if (nativeResult.handle != IntPtr.Zero)
+                {
+                    NsdkExternUtils.ReleaseResource(nativeResult.handle);
+                }
+
+                return PollState<SiteAssetsResult>.Success(SiteAssetsResult.Success(entries));
+            }
+
+            if (requestStatus == SitesRequestStatus.Failed)
+            {
+                if (nativeResult.handle != IntPtr.Zero)
+                {
+                    NsdkExternUtils.ReleaseResource(nativeResult.handle);
+                }
+                return PollState<SiteAssetsResult>.Failed((SitesError)nativeResult.error);
+            }
+
+            return PollState<SiteAssetsResult>.InProgress();
+        }
+
+        private void ThrowIfDisposed()
+        {
+            if (_isDisposed)
+            {
+                throw new ObjectDisposedException(nameof(SitesClient));
+            }
+        }
+    }
+}
