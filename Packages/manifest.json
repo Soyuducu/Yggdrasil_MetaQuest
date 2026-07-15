@@ -1,7 +1,6 @@
 {
   "dependencies": {
     "com.multiset.sdk.quest": "file:../multiset-quest-sdk-main",
-    "com.nianticspatial.nsdk": "file:../nsdk-library-upm-main/nsdk-library-upm-main",
     "com.unity.adaptiveperformance": "6.0.0",
     "com.unity.adaptiveperformance.google.android": "6.0.0",
     "com.unity.adaptiveperformance.samsung.android": "5.1.0",
