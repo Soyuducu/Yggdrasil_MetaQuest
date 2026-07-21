@@ -14,7 +14,7 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/MetaQuest_Scene/MetaQuest_Yggdrasil_Scene.unity
     guid: 816af9813fab77e45a26fb19fbd7810e
-  - enabled: 1
+  - enabled: 0
     path: Assets/MetaQuest_Scene/MetaQuest_Yggdrasil_SceneNoAR.unity
     guid: 6a41c17925d70ea4abb07df5d71343ba
   m_configObjects:
