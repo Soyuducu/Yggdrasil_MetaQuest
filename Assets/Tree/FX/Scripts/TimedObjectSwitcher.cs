@@ -54,7 +54,7 @@ public class TimedObjectSwitcher : MonoBehaviour
     void Update()
     {
         if (sequence.Count == 0) return;
-        //if (f == false) return;
+        if (f == false) return;
 
         TimedGroup currentGroup = sequence[currentIndex];
         stepTimer += Time.deltaTime;
@@ -145,6 +145,21 @@ public class TimedObjectSwitcher : MonoBehaviour
     }
     public void func() 
     {
+        f = true;
+    }
+    public void funcReset() 
+    {
+        foreach (var group in sequence)
+        {
+            if (group.objects == null) continue;
+            foreach (var item in group.objects)
+            {
+                if (item.obj != null) item.obj.SetActive(false);
+            }
+        }
+
+        ResetGroupTimers(currentIndex);
+        
         f = true;
     }
 }
