@@ -13,7 +13,7 @@ PlayerSettings:
   useOnDemandResources: 0
   accelerometerFrequency: 60
   companyName: arpoint
-  productName: Meta_Test_01
+  productName: Meta_Test_01a
   defaultCursor: {fileID: 0}
   cursorHotspot: {x: 0, y: 0}
   m_SplashScreenBackgroundColor: {r: 0.13725491, g: 0.12156863, b: 0.1254902, a: 1}
@@ -169,7 +169,7 @@ PlayerSettings:
   androidMaxAspectRatio: 2.1
   androidMinAspectRatio: 1
   applicationIdentifier:
-    Android: com.arpoint.YggdrasilMQTest
+    Android: com.arpoint.Meta_Test_01a
     Standalone: com.nianticspatial.nsdk.nsdksamples
     iPhone: com.nianticspatial.nsdk.nsdksamples
   buildNumber:
