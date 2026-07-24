@@ -143,8 +143,10 @@ public class TimedObjectSwitcher : MonoBehaviour
             }
         }
     }
+
     public void func() 
     {
         f = true;
     }
+    
 }
