@@ -17,6 +17,9 @@ EditorBuildSettings:
   - enabled: 0
     path: Assets/MetaQuest_Scene/MetaQuest_Yggdrasil_SceneNoAR.unity
     guid: 6a41c17925d70ea4abb07df5d71343ba
+  - enabled: 0
+    path: Assets/Samples/MultiSet Quest SDK/1.15.0/Sample Scenes/Localization/Localization.unity
+    guid: 60c075d3181b7494089650d09106be01
   m_configObjects:
     Niantic.Lightship.AR.LightshipSettings: {fileID: 11400000, guid: 05b0489c7d3114fe3b5a5321c06a66dd, type: 2}
     Niantic.Lightship.AR.NSDKNsdkSettings: {fileID: 0}
