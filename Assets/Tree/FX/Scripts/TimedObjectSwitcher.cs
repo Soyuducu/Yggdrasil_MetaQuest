@@ -54,7 +54,7 @@ public class TimedObjectSwitcher : MonoBehaviour
     void Update()
     {
         if (sequence.Count == 0) return;
-        if (f == false) return;
+        //if (f == false) return;
 
         TimedGroup currentGroup = sequence[currentIndex];
         stepTimer += Time.deltaTime;
