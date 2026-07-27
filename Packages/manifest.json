@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "com.multiset.sdk.quest": "https://github.com/MultiSet-AI/multiset-quest-sdk.git",
+    "com.multiset.sdk.quest": "file:../multiset-quest-sdk-main",
     "com.unity.adaptiveperformance": "6.0.0",
     "com.unity.adaptiveperformance.google.android": "6.0.0",
     "com.unity.adaptiveperformance.samsung.android": "5.1.0",
